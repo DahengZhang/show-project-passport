@@ -1,8 +1,9 @@
 const mysql = require('mysql')
+const { getArgv } = require('../config/util')
 
 module.exports = mysql.createConnection({
-    host: 'localhost',
+    host: '111.231.93.160',
     user: 'root',
-    password: 'iCain0055',
+    password: getArgv('password'),
     database: 'passport'
 })
