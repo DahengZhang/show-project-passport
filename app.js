@@ -1,20 +1,39 @@
 const Koa = require('koa')
 const Router = require('koa-router')
 const axios = require('axios')
+const mongoose = require('mongoose')
+const jwt = require('jsonwebtoken')
 const app = new Koa()
 const router = new Router()
 
-const connection = require('./dao/mysql')
+const { getArgv } = require('./config/util')
 const { github } = require('./config/config')
-const { findUserById, insertUser, updateUser } = require('./dao/user')
 
-connection.connect((err) => {
-    if (err) {
-        console.error(`Connection Mysql on ${err}`)
-        return
+mongoose.connect(`mongodb://${getArgv('account') || getArgv('collection') || 'show'}:${getArgv('password')}@${getArgv('database') || 'localhost'}/${getArgv('collection') || 'show'}`, { useNewUrlParser: true, useUnifiedTopology: true, useFindAndModify: false }, () => console.log('mongodb link success!'))
+mongoose.connection.on('error', console.error)
+
+const userSchema = mongoose.model('users', new mongoose.Schema({
+    __v: {
+        type: Number,
+        select: false
+    },
+    id: {
+        type: Number,
+        required: true
+    },
+    email: {
+        type: String,
+        required: true
+    },
+    name: {
+        type: String,
+        required: true
+    },
+    avatar: {
+        type: String,
+        required: true
     }
-    console.log(`Connection Mysql success!`)
-})
+}))
 
 router.get('/', async ctx => {
     const { s_url } = ctx.query
@@ -27,29 +46,29 @@ router.get('/login', async ctx => {
     const { code } = ctx.query
     try {
         const res = await axios.post('https://github.com/login/oauth/access_token', {
-            client_id: oauth.github.client_id,
-            client_secret: oauth.github.client_secret,
+            client_id: github.client_id,
+            client_secret: github.client_secret,
             code
         }, {
             headers: {
                 'Accept': 'application/json'
             }
         })
-        const { data } = await axios.get('https://api.github.com/user', null, {
+        const { data } = await axios.get('https://api.github.com/user', {
             headers: {
-                'Authorization': 'Bearer ' + res.data.access_token
+                'Authorization': `${res.data.token_type} ${res.data.access_token}`
             }
         })
-        const has = await findUserById(data.id)
-        const info = {
-            uuid: data.id,
-            name: data.name,
+        const tmp = await userSchema.findOneAndUpdate({
+            id: data.id
+        }, {
             email: data.email,
-            avatar: data.avatar
-        }
+            name: data.name,
+            avatar: data.avatar_url
+        }, { new: true, upsert: true }).select('-email -_id')
         ctx.body = {
-            code: 200,
-            data: has ? await updateUser(info) : await insertUser(info)
+            ...tmp.toObject(),
+            token: jwt.sign({ id: tmp.id }, getArgv('secret'), { expiresIn: '8h' })
         }
     } catch (error) {
         ctx.throw(500)
