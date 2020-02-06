@@ -1,5 +1,6 @@
 const Koa = require('koa')
 const Router = require('koa-router')
+const error = require('koa-json-error')
 const axios = require('axios')
 const mongoose = require('mongoose')
 const jwt = require('jsonwebtoken')
@@ -8,6 +9,7 @@ const router = new Router()
 
 const { getArgv } = require('./config/util')
 const { github } = require('./config/config')
+const isDev = process.env.NODE_ENV === 'development'
 
 mongoose.connect(`mongodb://${getArgv('account') || getArgv('collection') || 'show'}:${getArgv('password')}@${getArgv('database') || 'localhost'}/${getArgv('collection') || 'show'}`, { useNewUrlParser: true, useUnifiedTopology: true, useFindAndModify: false }, () => console.log('mongodb link success!'))
 mongoose.connection.on('error', console.error)
@@ -44,36 +46,43 @@ router.get('/', async ctx => {
 
 router.get('/login', async ctx => {
     const { code } = ctx.query
-    try {
-        const res = await axios.post('https://github.com/login/oauth/access_token', {
-            client_id: github.client_id,
-            client_secret: github.client_secret,
-            code
-        }, {
-            headers: {
-                'Accept': 'application/json'
-            }
-        })
-        const { data } = await axios.get('https://api.github.com/user', {
-            headers: {
-                'Authorization': `${res.data.token_type} ${res.data.access_token}`
-            }
-        })
-        const tmp = await userSchema.findOneAndUpdate({
-            id: data.id
-        }, {
-            email: data.email,
-            name: data.name,
-            avatar: data.avatar_url
-        }, { new: true, upsert: true }).select('-email -_id')
-        ctx.body = {
-            ...tmp.toObject(),
-            token: jwt.sign({ id: tmp.id }, getArgv('secret'), { expiresIn: '8h' })
+    const res = await axios.post('https://github.com/login/oauth/access_token', {
+        client_id: github.client_id,
+        client_secret: github.client_secret,
+        code
+    }, {
+        headers: {
+            'Accept': 'application/json'
         }
-    } catch (error) {
-        ctx.throw(500)
+    })
+    if (res.data.error) {
+        ctx.throw(400, res.data.error_description)
+    }
+    const { data } = await axios.get('https://api.github.com/user', {
+        headers: {
+            'Authorization': `${res.data.token_type} ${res.data.access_token}`
+        }
+    })
+    const tmp = await userSchema.findOneAndUpdate({
+        id: data.id
+    }, {
+        email: data.email,
+        name: data.name,
+        avatar: data.avatar_url
+    }, { new: true, upsert: true }).select('-email -_id')
+    ctx.body = {
+        ...tmp.toObject(),
+        token: jwt.sign({ id: tmp.id }, getArgv('secret'), { expiresIn: '8h' })
     }
 })
+
+app.use(async (ctx, next) => {
+    ctx.set('Access-Control-Allow-Origin', '*')
+    await next()
+})
+app.use(error({
+    postFormat: (_, { stack, ...rest }) => isDev ? { stack, ...rest } : rest
+}))
 
 app.use(router.routes())
 
