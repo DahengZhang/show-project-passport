@@ -69,7 +69,7 @@ router.get('/login', async ctx => {
         email: data.email,
         name: data.name,
         avatar: data.avatar_url
-    }, { new: true, upsert: true }).select('-email -_id -id')
+    }, { new: true, upsert: true }).select('-email -_id')
     ctx.body = {
         ...tmp.toObject(),
         token: jwt.sign({ id: tmp.id }, getArgv('secret'), { expiresIn: '8h' })
